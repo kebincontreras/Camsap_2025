@@ -12,7 +12,7 @@ from Resources.Ultris.Ultris_zernike import generate_zernike_map, generate_psf, 
 
 # Configuraciones generales
 n, m = 2, 2
-image_dir = "Images"
+image_dir = "Resources\Images"
 output_root = "resultados_wiener"
 os.makedirs(output_root, exist_ok=True)
 
