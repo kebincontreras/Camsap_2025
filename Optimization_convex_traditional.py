@@ -13,7 +13,7 @@ from Resources.Ultris.Ultris_zernike import generate_zernike_map, generate_psf, 
 # Configuraciones generales
 n, m = 2, 2
 image_dir = "Resources\Images"
-output_root = "resultados_wiener"
+output_root = "Resources\resultados_wiener"
 os.makedirs(output_root, exist_ok=True)
 
 resize_to_512 = Resize((256, 256))  # Ajusta tamaño según necesites
