@@ -44,3 +44,20 @@ class UNet(nn.Module):
         dec1 = self.dec1(torch.cat([up1, enc1], dim=1))
 
         return torch.sigmoid(self.final(dec1))
+
+
+
+class SimpleCNN(nn.Module):
+    def __init__(self, in_channels=1, out_channels=1):
+        super().__init__()
+        self.conv1 = nn.Conv2d(in_channels, 32, kernel_size=3, padding=1)
+        self.relu1 = nn.ReLU(inplace=True)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
+        self.relu2 = nn.ReLU(inplace=True)
+        self.conv3 = nn.Conv2d(64, out_channels, kernel_size=3, padding=1)
+        
+    def forward(self, x):
+        x = self.relu1(self.conv1(x))
+        x = self.relu2(self.conv2(x))
+        x = torch.sigmoid(self.conv3(x))
+        return x
