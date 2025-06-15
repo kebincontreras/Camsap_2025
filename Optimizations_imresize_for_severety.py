@@ -17,7 +17,7 @@ from losses import loss_functions
 
 # Configuraciones generales
 n, m = 2, 0
-num_epochs = 2
+num_epochs = 50
 image_dir = "Resources/Images_kity"
 output_root = "Resources/resultados_epocas"
 os.makedirs(output_root, exist_ok=True)
