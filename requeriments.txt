@@ -7,3 +7,4 @@ wandb
 scikit-image
 opencv-python
 scipy
+gradio

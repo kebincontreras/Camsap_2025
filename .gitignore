@@ -196,3 +196,11 @@ cython_debug/
 # Direcory Results
 
 .resultados_epocas/
+
+# Virtual environment folders
+env/
+pytorch_cuda12/
+*.venv/
+*.env/
+venv/
+CAMSAP/

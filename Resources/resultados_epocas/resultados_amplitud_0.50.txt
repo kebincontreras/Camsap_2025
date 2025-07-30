@@ -1,0 +1,3 @@
+
+=== Experimento: unet_x ===
+[Amp 0.50][unet_x] Epoch 1 | Train MSE: 0.083462 | Val SSIM: 0.6061 | PSNR h*x: 27.5045 | PSNR h*f(x): 12.7409

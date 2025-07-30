@@ -46,7 +46,9 @@ def zernike_radial(n, m, rho):
             - torch.lgamma(torch.tensor((n + m) // 2 - k + 1)) \
             - torch.lgamma(torch.tensor((n - m) // 2 - k + 1))
         coef = torch.exp(coef)
+        print(f"[DEBUG] Coeficiente en k={k}: {coef}")
         R += coef * rho**(n - 2 * k)
+        print(f"[DEBUG] R acumulado en k={k}: {R}")
     return R
 
 def zernike(n, m, rho, theta):
@@ -64,9 +66,13 @@ def generate_zernike_map(n, m, size=256, amplitude=1.0):
     X, Y = torch.meshgrid(y, x, indexing='ij')
     rho = torch.sqrt(X**2 + Y**2)
     theta = torch.atan2(Y, X)
+    print(f"[DEBUG] Valores de rho: {rho}")
+    print(f"[DEBUG] Valores de theta: {theta}")
     mask = rho <= 1
+    print(f"[DEBUG] Máscara aplicada: {mask}")
     Z = torch.zeros_like(rho)
     Z[mask] = amplitude * zernike(n, m, rho[mask], theta[mask])
+    print(f"[DEBUG] Zernike map generado con n={n}, m={m}, amplitud={amplitude}: {Z.shape}, valores: {Z}")
     return Z
 
 #def generate_psf(zernike_map):
@@ -82,12 +88,14 @@ def generate_psf(zernike_map):
         size = zernike_map.shape[0]
         psf = torch.zeros_like(zernike_map)
         psf[size // 2, size // 2] = 1.0
+        print(f"[DEBUG] PSF ideal generado (sin aberración): {psf.shape}, valores: {psf}")
         return psf
     else:
         pupil_function = torch.exp(1j * 2 * torch.pi * zernike_map)
         fft = torch.fft.fft2(pupil_function)
         psf = torch.fft.fftshift(torch.abs(fft) ** 2)
         psf = psf / psf.sum()
+        print(f"[DEBUG] PSF generado: {psf.shape}, valores: {psf}")
         return psf.real  # usamos solo la parte real (ya es real)
 
 
