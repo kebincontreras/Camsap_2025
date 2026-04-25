@@ -15,14 +15,14 @@ def sobel_gradients(img):
 def loss_unet_x(unet, h, x, apply_filter):
     return loss_fn(h(unet(x)), x)
 
-def loss_unet_x_high_freq(unet, h, x, lambd=0.1):
+def loss_unet_x_high_freq(unet, h, x, apply_filter, lambd=0.1):
     recon = h(unet(x))
     # Primer término: MSE
     recon_loss = F.mse_loss(recon, x)
     # Gradientes
     grad_x_recon, grad_y_recon = sobel_gradients(recon)
     grad_x, grad_y = sobel_gradients(x)
-    # Segundo término: L1 de gradientes
+    # Segundo término: L1 de gradientes Sobel
     grad_loss = F.l1_loss(grad_x_recon, grad_x) + F.l1_loss(grad_y_recon, grad_y)
     return recon_loss + lambd * grad_loss
 
