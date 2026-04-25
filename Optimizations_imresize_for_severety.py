@@ -1,9 +1,12 @@
 import os
+import warnings
+warnings.filterwarnings("ignore")
+import logging
+logging.getLogger("wandb").setLevel(logging.ERROR)
 import torch
 import numpy as np
 import wandb
 from PIL import Image
-import matplotlib.pyplot as plt
 from torchvision.transforms import ToTensor, Grayscale, Resize
 from torch.utils.data import DataLoader, Dataset
 from skimage.metrics import structural_similarity as ssim_metric, peak_signal_noise_ratio as psnr_metric
@@ -14,6 +17,7 @@ from Resources.Ultris.Ultris_zernike import generate_zernike_map, generate_psf, 
 import torch.nn.functional as F
 import cv2
 from skimage.restoration import richardson_lucy
+from tqdm import tqdm
 from losses import loss_functions
 
 # Configuraciones generales
@@ -68,12 +72,26 @@ class ImageDataset(Dataset):
     def __getitem__(self, idx):
         return load_image_tensor(self.paths[idx])
 
-all_image_paths = [os.path.join(image_dir, f"{i:06d}.png") for i in range(10)]
-train_paths = all_image_paths[:7]
-val_paths = all_image_paths[7:]
+# Listar todas las imagenes de KITTI disponibles
+import random
+kitti_files = sorted([f for f in os.listdir(image_dir) if f.endswith(".png")])
+all_image_paths = [os.path.join(image_dir, f) for f in kitti_files]
+
+# Excluir los 3 fijos de validacion (000007, 000008, 000009)
+val_fijos = ['000007.png', '000008.png', '000009.png']
+candidatos_train = [p for p in all_image_paths if os.path.basename(p) not in val_fijos]
+
+# Tomar aleatoriamente 80 para train y 20 para val del resto
+random.seed(42)
+random.shuffle(candidatos_train)
+train_paths = candidatos_train[:80]
+val_paths   = candidatos_train[80:100]  # 20 imagenes de validacion
+
+print(f"Dataset: {len(train_paths)} train | {len(val_paths)} val")
 
 train_loader = DataLoader(ImageDataset(train_paths), batch_size=1, shuffle=True)
-val_loader = DataLoader(ImageDataset(val_paths), batch_size=1, shuffle=False)
+val_loader   = DataLoader(ImageDataset(val_paths),   batch_size=1, shuffle=False)
+
 
 # Recorte centrado
 CROP = 20
@@ -90,7 +108,7 @@ def apply_psf_torch(image_tensor, psf_tensor):
 lpips_fn = lpips.LPIPS(net='alex').to(device)
 
 # Lista de severidades a procesar
-amplitudes = [0.5]
+amplitudes = [0.5, 1.0, 2.0, 3.0]
 
 # Lista de nombres de experimentos (losses) a probar
 experiment_names = list(loss_functions.keys())
@@ -152,12 +170,14 @@ for amplitud in amplitudes:
                 total_loss = 0.0
                 train_mses, train_ssims, train_psnrs = [], [], []
 
-                for x in train_loader:
+                pbar = tqdm(train_loader, desc=f"  Ep {epoch:02d}/{num_epochs}", leave=False, ncols=80)
+                for x in pbar:
                     x = x.to(device)
                     loss = loss_fn(*model_args, h, x, apply_filter)
                     optimizer.zero_grad()
                     loss.backward()
                     optimizer.step()
+                    pbar.set_postfix(loss=f"{loss.item():.5f}")
 
                     total_loss += loss.item()
 
@@ -256,22 +276,7 @@ for amplitud in amplitudes:
                     "hfx_lpips": lpips_hfx
                 })
 
-                fig, axs = plt.subplots(1, 5, figsize=(18, 4))
-                axs[0].imshow(x_np, cmap='gray')
-                axs[0].set_title("x (original)")
-                axs[1].imshow(h_x, cmap='gray')
-                axs[1].set_title(f"h*x\nSSIM: {ssim_hx:.2f}\nMSE: {mse_hx:.4f}\nPSNR: {psnr_hx:.1f}")
-                axs[2].imshow(fx_np, cmap='gray')
-                axs[2].set_title("f(x)")
-                axs[3].imshow(h_fx, cmap='gray')
-                axs[3].set_title(f"h*f(x)\nSSIM: {ssim_hfx:.2f}\nPSNR: {psnr_hfx:.1f}\nLPIPS: {lpips_hfx:.3f}")
-                axs[4].imshow(diff, cmap='gray')
-                axs[4].set_title("|x - h*f(x)|")
-                for ax in axs:
-                    ax.axis('off')
-                plt.tight_layout()
-                plt.savefig(os.path.join(output_dir, f"epoca_{epoch:03d}.png"))
-                plt.close()
+                # Reducido: Las imagenes matplotlib de epoca han sido eliminadas por rendimiento.
 
             # Guardar ambos modelos si aplica
             if "cnn0_unet" in experiment_name or "unet_cnn0" in experiment_name:
@@ -279,4 +284,13 @@ for amplitud in amplitudes:
                 torch.save(cnn0.state_dict(), os.path.join(output_dir, "cnn0_final.pt"))
             else:
                 torch.save(main_model.state_dict(), os.path.join(output_dir, "modelo_final.pt"))
+                
+                # Guardar clon del peso exclusivo de "unet_x" (Solo-MSE) en la carpeta separada
+                if experiment_name == "unet_x":
+                    weights_dest = "Resources/weights_MSE_UNET"
+                    os.makedirs(weights_dest, exist_ok=True)
+                    
+                    # Convertir ampltitud a 1/2/3 string para estandar
+                    fmt_amp = int(amplitud) if isinstance(amplitud, float) and amplitud.is_integer() else amplitud
+                    torch.save(main_model.state_dict(), os.path.join(weights_dest, f"modelo_final_{fmt_amp}.pt"))
     wandb.finish()

@@ -204,3 +204,11 @@ pytorch_cuda12/
 *.env/
 venv/
 CAMSAP/
+
+# --- Datasets e imagenes generadas (archivos pesados, no versionar) ---
+Resources/DIV2K/
+Resources/ImageNet/
+Resources/Images_kity/
+Resources/evaluaciones/
+Resources/resultados_epocas/
+Resources/wandb/

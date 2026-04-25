@@ -1,3 +1,12 @@
 
 === Experimento: unet_x ===
-[Amp 0.50][unet_x] Epoch 1 | Train MSE: 0.083462 | Val SSIM: 0.6061 | PSNR h*x: 27.5045 | PSNR h*f(x): 12.7409
+
+=== Experimento: unet_x ===
+[Amp 0.50][unet_x] Epoch 1 | Train MSE: 0.009092 | Val SSIM: 0.8417 | PSNR h*x: 27.5045 | PSNR h*f(x): 30.2466 | LPIPS h*f(x): 0.1357
+
+=== Experimento: unet_x ===
+[Amp 0.50][unet_x] Epoch 1 | Train MSE: 0.015280 | Val SSIM: 0.7847 | PSNR h*x: 22.7682 | PSNR h*f(x): 22.9487 | LPIPS h*f(x): 0.5186
+[Amp 0.50][unet_x] Epoch 2 | Train MSE: 0.005502 | Val SSIM: 0.7858 | PSNR h*x: 22.7682 | PSNR h*f(x): 24.6687 | LPIPS h*f(x): 0.3999
+[Amp 0.50][unet_x] Epoch 3 | Train MSE: 0.009825 | Val SSIM: 0.7288 | PSNR h*x: 22.7682 | PSNR h*f(x): 25.7152 | LPIPS h*f(x): 0.3515
+[Amp 0.50][unet_x] Epoch 4 | Train MSE: 0.013435 | Val SSIM: 0.6558 | PSNR h*x: 22.7682 | PSNR h*f(x): 26.0558 | LPIPS h*f(x): 0.3176
+[Amp 0.50][unet_x] Epoch 5 | Train MSE: 0.016307 | Val SSIM: 0.6263 | PSNR h*x: 22.7682 | PSNR h*f(x): 26.2657 | LPIPS h*f(x): 0.2975
