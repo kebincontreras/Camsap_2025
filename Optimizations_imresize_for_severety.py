@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 from torchvision.transforms import ToTensor, Grayscale, Resize
 from torch.utils.data import DataLoader, Dataset
 from skimage.metrics import structural_similarity as ssim_metric, peak_signal_noise_ratio as psnr_metric
+import lpips
 from Resources.Ultris.Ultris_model import UNet
 from Resources.Ultris.Ultris_model import SimpleCNN
 from Resources.Ultris.Ultris_zernike import generate_zernike_map, generate_psf, apply_psf, device
@@ -84,6 +85,9 @@ def apply_psf_torch(image_tensor, psf_tensor):
     if psf_tensor.max() == 1.0 and psf_tensor.sum() == 1.0 and torch.count_nonzero(psf_tensor) == 1:
         return image_tensor
     return F.conv2d(image_tensor, psf_tensor, padding="same")
+
+# Inicializar modelo LPIPS (red AlexNet, más rápida)
+lpips_fn = lpips.LPIPS(net='alex').to(device)
 
 # Lista de severidades a procesar
 amplitudes = [0.5]
@@ -214,9 +218,19 @@ for amplitud in amplitudes:
                 mse_hfx = np.mean((x_np - h_fx) ** 2)
                 psnr_hfx = psnr_metric(x_np, h_fx, data_range=1.0)
 
+                # LPIPS para h(f(x)) vs x — convierte a tensores [1,3,H,W] en rango [-1,1]
+                x_lpips = torch.tensor(x_np).unsqueeze(0).unsqueeze(0).to(device)
+                x_lpips = x_lpips * 2.0 - 1.0  # [0,1] -> [-1,1]
+                x_lpips = x_lpips.repeat(1, 3, 1, 1)  # 1ch -> 3ch
+                hfx_lpips = torch.tensor(h_fx).unsqueeze(0).unsqueeze(0).to(device)
+                hfx_lpips = hfx_lpips * 2.0 - 1.0
+                hfx_lpips = hfx_lpips.repeat(1, 3, 1, 1)
+                with torch.no_grad():
+                    lpips_hfx = lpips_fn(x_lpips, hfx_lpips).item()
+
                 log_str = (f"[Amp {amplitud:.2f}][{experiment_name}] Epoch {epoch} | "
                            f"Train MSE: {np.mean(train_mses):.6f} | Val SSIM: {np.mean(val_ssims):.4f} | "
-                           f"PSNR h*x: {psnr_hx:.4f} | PSNR h*f(x): {psnr_hfx:.4f}")
+                           f"PSNR h*x: {psnr_hx:.4f} | PSNR h*f(x): {psnr_hfx:.4f} | LPIPS h*f(x): {lpips_hfx:.4f}")
                 print(log_str)
                 ftxt.write(log_str + "\n")
                 ftxt.flush()
@@ -238,7 +252,8 @@ for amplitud in amplitudes:
                     "hx_psnr": psnr_hx,
                     "hfx_ssim": ssim_hfx,
                     "hfx_mse": mse_hfx,
-                    "hfx_psnr": psnr_hfx
+                    "hfx_psnr": psnr_hfx,
+                    "hfx_lpips": lpips_hfx
                 })
 
                 fig, axs = plt.subplots(1, 5, figsize=(18, 4))
@@ -249,7 +264,7 @@ for amplitud in amplitudes:
                 axs[2].imshow(fx_np, cmap='gray')
                 axs[2].set_title("f(x)")
                 axs[3].imshow(h_fx, cmap='gray')
-                axs[3].set_title(f"h*f(x)\nSSIM: {ssim_hfx:.2f}\nMSE: {mse_hfx:.4f}\nPSNR: {psnr_hfx:.1f}")
+                axs[3].set_title(f"h*f(x)\nSSIM: {ssim_hfx:.2f}\nPSNR: {psnr_hfx:.1f}\nLPIPS: {lpips_hfx:.3f}")
                 axs[4].imshow(diff, cmap='gray')
                 axs[4].set_title("|x - h*f(x)|")
                 for ax in axs:

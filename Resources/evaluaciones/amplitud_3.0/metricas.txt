@@ -1,0 +1,24 @@
+Resultados Amplitud 3.0:
+
+| Métrica | Condición | Promedio | Desv. Est. | Mínimo | Máximo |
+|---------|-----------|----------|------------|--------|--------|
+| PSNR    | Baseline  |    19.55 |       1.34 |  17.72 |  20.87 |
+| PSNR    | Wiener    |    17.32 |       1.19 |  15.66 |  18.42 |
+| PSNR    | UNet      |    21.06 |       1.43 |  19.15 |  22.60 |
+| SSIM    | Baseline  |   0.6457 |     0.0920 | 0.5231 | 0.7448 |
+| SSIM    | Wiener    |   0.6954 |     0.0692 | 0.6023 | 0.7680 |
+| SSIM    | UNet      |   0.7702 |     0.0684 | 0.6752 | 0.8336 |
+| LPIPS   | Baseline  |   0.4822 |     0.0373 | 0.4300 | 0.5153 |
+| LPIPS   | Wiener    |   0.3017 |     0.0294 | 0.2804 | 0.3432 |
+| LPIPS   | UNet      |   0.2641 |     0.0293 | 0.2377 | 0.3050 |
+
+Mejora UNet vs Baseline (Δ):
+  Δ PSNR : +1.51
+  Δ SSIM : +0.1245
+  Δ LPIPS: -0.2181 (Negativo es mejor)
+  
+Mejora UNet vs Wiener (Δ):
+  Δ PSNR : +3.75
+  Δ SSIM : +0.0749
+  Δ LPIPS: -0.0375 (Negativo es mejor)
+----------------------------------------------------------------------

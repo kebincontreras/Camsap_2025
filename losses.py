@@ -82,21 +82,23 @@ def loss_unet_x_constraint(unet, h, x, apply_filter, alpha=1.0):
     constraint_loss = F.mse_loss(h(x_hat), y)
     return recon_loss + alpha * constraint_loss
 
-# Diccionario de funciones de pérdida
+
 loss_functions = {
-    "unet_x": loss_unet_x,
-    "unet_wiener": loss_unet_wiener,
-    "unet_media": loss_unet_media,
-    "cnn0_x": loss_cnn0_x,
-    "cnn0_wiener": loss_cnn0_wiener,
-    "cnn0_media": loss_cnn0_media,
-    "wiener_unet_x": loss_wiener_unet_x,
-    "wiener_unet_wiener": loss_wiener_unet_wiener,
-    "wiener_cnn0_x": loss_wiener_cnn0_x,
-    "wiener_cnn0_wiener": loss_wiener_cnn0_wiener,
-    "cnn0_unet_x": loss_cnn0_unet_x,
-    "cnn0_unet_wiener": loss_cnn0_unet_wiener,
-    "unet_x_high_freq": loss_unet_x_high_freq,
-    "cnn0_x_constraint": loss_cnn0_x_constraint,
-    "unet_x_constraint": loss_unet_x_constraint,
+    "unet_x": loss_unet_x,                      # Baseline Neuronal (Solo MSE)
+    "unet_x_high_freq": loss_unet_x_high_freq,  # Propuesta Central (MSE + Gradientes Sobel)
+    
+    # --- EXPERIMENTALES DESHABILITADAS ---
+    # "unet_wiener": loss_unet_wiener,
+    # "unet_media": loss_unet_media,
+    # "cnn0_x": loss_cnn0_x,
+    # "cnn0_wiener": loss_cnn0_wiener,
+    # "cnn0_media": loss_cnn0_media,
+    # "wiener_unet_x": loss_wiener_unet_x,
+    # "wiener_unet_wiener": loss_wiener_unet_wiener,
+    # "wiener_cnn0_x": loss_wiener_cnn0_x,
+    # "wiener_cnn0_wiener": loss_wiener_cnn0_wiener,
+    # "cnn0_unet_x": loss_cnn0_unet_x,
+    # "cnn0_unet_wiener": loss_cnn0_unet_wiener,
+    # "cnn0_x_constraint": loss_cnn0_x_constraint,
+    # "unet_x_constraint": loss_unet_x_constraint,
 }
