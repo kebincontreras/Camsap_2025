@@ -84,8 +84,8 @@ def loss_unet_x_constraint(unet, h, x, apply_filter, alpha=1.0):
 
 
 loss_functions = {
-    "unet_x": loss_unet_x,                      # Baseline Neuronal (Solo MSE)
-    #"unet_x_high_freq": loss_unet_x_high_freq,  # Propuesta Central (MSE + Gradientes Sobel)
+    #"unet_x": loss_unet_x,                      # Baseline Neuronal (Solo MSE)
+    "unet_x_high_freq": loss_unet_x_high_freq,  # Propuesta Central (MSE + Gradientes Sobel)
     
     # --- EXPERIMENTALES DESHABILITADAS ---
     # "unet_wiener": loss_unet_wiener,

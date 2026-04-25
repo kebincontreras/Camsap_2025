@@ -13,3 +13,5 @@ scipy
 gradio
 lpips
 tqdm
+datasets
+requests

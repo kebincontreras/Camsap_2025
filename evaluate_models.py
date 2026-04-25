@@ -17,8 +17,9 @@ from tqdm import tqdm
 
 # --- Configuraciones ---
 n, m = 2, 0  # Aberración: Miopía
-weights_dir = "Resources/weights"
-output_root = "Resources/evaluaciones"
+weights_dir         = "Resources/weights_prop_UNET"  # UNet entrenado con pérdida propuesta (MSE + Sobel)
+weights_mse_dir     = "Resources/weights_MSE_UNET"  # UNet entrenado solo con MSE
+output_root         = "Resources/evaluaciones"
 os.makedirs(output_root, exist_ok=True)
 
 amplitudes = [0.5, 1.0, 2.0, 3.0]
@@ -27,9 +28,9 @@ CROP = 20
 
 # Diccionario de datasets disponibles para evaluar
 datasets_dirs = {
-    "KITTI": "Resources/Images_kity",
+    "KITTI":   "Resources/Images_kity",
     "ImageNet": "Resources/ImageNet",
-    "DIV2K": "Resources/DIV2K"
+    "DIV2K":   "Resources/DIV2K"
 }
 
 # Inicializar modelo LPIPS
@@ -56,11 +57,9 @@ def get_dataset_paths(dname, ddir):
     if not os.path.exists(ddir):
         return []
     if dname == "KITTI":
-        # Para KITTI, mantenemos la lógica de sacar del 7 al 9 para validación basado en el entorno previo
         paths = [os.path.join(ddir, f"{i:06d}.png") for i in range(7, 10)]
         return [p for p in paths if os.path.exists(p)]
     else:
-        # Para ImageNet y DIV2K tomamos todas las imagenes que haya (fueron preguardadas)
         paths = sorted([os.path.join(ddir, f) for f in os.listdir(ddir) if f.endswith(".png")])
         return paths
 
@@ -74,191 +73,225 @@ class ImageDataset(Dataset):
     def __getitem__(self, idx):
         return load_image_tensor(self.paths[idx])
 
+def get_weight_path(base_dir, amplitud):
+    """Busca el archivo de pesos con fallback para nombres sin decimales."""
+    path = os.path.join(base_dir, f"modelo_final_{amplitud}.pt")
+    if not os.path.exists(path) and amplitud == 1.0:
+        path = os.path.join(base_dir, "modelo_final_1.pt")
+    elif not os.path.exists(path) and amplitud == 2.0:
+        path = os.path.join(base_dir, "modelo_final_2.pt")
+    elif not os.path.exists(path) and amplitud == 3.0:
+        path = os.path.join(base_dir, "modelo_final_3.pt")
+    return path if os.path.exists(path) else None
+
+def load_unet(weight_path):
+    """Carga y devuelve un UNet en modo eval."""
+    model = UNet(in_channels=1, out_channels=1).to(device)
+    model.load_state_dict(torch.load(weight_path, map_location=device))
+    model.eval()
+    return model
+
+def compute_lpips(arr_a, arr_b):
+    """Calcula LPIPS entre dos arrays numpy [H,W] float32 en [0,1]."""
+    t_a = torch.tensor(arr_a).unsqueeze(0).unsqueeze(0).to(device)
+    t_b = torch.tensor(arr_b).unsqueeze(0).unsqueeze(0).to(device)
+    t_a = (t_a * 2.0 - 1.0).repeat(1, 3, 1, 1)
+    t_b = (t_b * 2.0 - 1.0).repeat(1, 3, 1, 1)
+    with torch.no_grad():
+        return lpips_fn(t_a, t_b).item()
+
+def get_stats(arr):
+    arr = np.array(arr)
+    if len(arr) == 0:
+        return 0, 0, 0, 0
+    return np.mean(arr), np.std(arr), np.min(arr), np.max(arr)
+
+# ---------------------------------------------------------------------------
 # Archivo de resumen global
+# ---------------------------------------------------------------------------
 summary_txt_path = os.path.join(output_root, "resumen_global.txt")
 
 with open(summary_txt_path, "w", encoding="utf-8") as f_summary:
     f_summary.write("=== Resumen Global de Evaluaciones ===\n\n")
+    f_summary.write(
+        "Métodos comparados:\n"
+        "  1. Baseline   : imagen aberrada h*x vs original x\n"
+        "  2. Wiener     : filtro Wiener clásico\n"
+        "  3. UNet-MSE   : UNet entrenado SOLO con pérdida MSE\n"
+        "  4. UNet-Prop  : UNet entrenado con pérdida propuesta (MSE + Sobel)\n\n"
+    )
 
     print("\n[+] Iniciando proceso de evaluación para todas las amplitudes...")
-    
-    # Iterar sobre las diferentes severidades (amplitudes)
-    for amplitud in amplitudes:
-        
-        weight_path = os.path.join(weights_dir, f"modelo_final_{amplitud}.pt")
-        # Nota: ajustamos nombre_archivo en caso de ser "1" en lugar de "1.0"
-        if amplitud == 1.0 and not os.path.exists(weight_path):
-            weight_path = os.path.join(weights_dir, "modelo_final_1.pt")
-        elif amplitud == 2.0 and not os.path.exists(weight_path):
-            weight_path = os.path.join(weights_dir, "modelo_final_2.pt")
-        elif amplitud == 3.0 and not os.path.exists(weight_path):
-            weight_path = os.path.join(weights_dir, "modelo_final_3.pt")
 
-        if not os.path.exists(weight_path):
-            print(f"  [!] No se encontraron pesos en {weight_path}. Saltando...")
+    for amplitud in amplitudes:
+
+        # --- Cargar pesos UNet-Propuesto ---
+        wp_prop = get_weight_path(weights_dir, amplitud)
+        if wp_prop is None:
+            print(f"  [!] No hay pesos propuestos para amplitud {amplitud} en '{weights_dir}'. Saltando...")
             continue
+        model_prop = load_unet(wp_prop)
+        print(f"\n[Amp {amplitud}] UNet-Propuesto cargado desde: {wp_prop}")
+
+        # --- Cargar pesos UNet-MSE (opcional, puede no existir aún) ---
+        wp_mse = get_weight_path(weights_mse_dir, amplitud)
+        model_mse = None
+        if wp_mse:
+            model_mse = load_unet(wp_mse)
+            print(f"[Amp {amplitud}] UNet-MSE      cargado desde: {wp_mse}")
+        else:
+            print(f"[Amp {amplitud}] UNet-MSE no encontrado en '{weights_mse_dir}'. "
+                  f"Se omitirá esa columna para esta amplitud.")
+
+        # --- Generar la PSF para esta amplitud ---
+        zmap = generate_zernike_map(n, m, amplitude=amplitud)
+        psf  = generate_psf(zmap)
+        psf_tensor = psf.unsqueeze(0).unsqueeze(0).to(device)
 
         output_dir = os.path.join(output_root, f"amplitud_{amplitud}")
         os.makedirs(output_dir, exist_ok=True)
 
-        # 1. Cargar el modelo UNet
-        model = UNet(in_channels=1, out_channels=1).to(device)
-        model.load_state_dict(torch.load(weight_path, map_location=device))
-        model.eval()
-
-        # 2. Generar el mapa Zernike y la PSF para la aberración actual
-        zmap = generate_zernike_map(n, m, amplitude=amplitud)
-        psf = generate_psf(zmap)
-        psf_tensor = psf.unsqueeze(0).unsqueeze(0).to(device)
-
-        # 3. Iterar por cada Dataset Independiente
+        # --- Iterar datasets ---
         for dname, ddir in datasets_dirs.items():
             val_paths = get_dataset_paths(dname, ddir)
             if not val_paths:
                 print(f"  [!] Dataset {dname} no encontrado en {ddir}. Saltando...")
                 continue
-                
+
             val_loader = DataLoader(ImageDataset(val_paths), batch_size=1, shuffle=False)
-            
-            # Directorio especifico para este dataset en esta amplitud
+
             ds_output_dir = os.path.join(output_dir, dname)
             os.makedirs(ds_output_dir, exist_ok=True)
 
-            val_ssims_hx, val_psnrs_hx, val_lpips_hx = [], [], []
-            val_ssims_wiener, val_psnrs_wiener, val_lpips_wiener = [], [], []
-            val_ssims_hfx, val_psnrs_hfx, val_lpips_hfx = [], [], []
+            # Acumuladores de métricas
+            psnrs_hx,      ssims_hx,      lpips_hx_list      = [], [], []
+            psnrs_wiener,  ssims_wiener,  lpips_wiener_list   = [], [], []
+            psnrs_mse,     ssims_mse,     lpips_mse_list      = [], [], []
+            psnrs_prop,    ssims_prop,    lpips_prop_list     = [], [], []
 
-            # Evaluar imágenes del dataset
-            for idx, x_img in enumerate(tqdm(val_loader, desc=f"Evaluando Amp {amplitud} | {dname}")):
-                with torch.no_grad():
-                    x_img = x_img.to(device)
-                    fx = model(x_img) # Imagen transformada f(x)
-
-                x_np_raw = x_img.squeeze().cpu().numpy()
-                fx_np_raw = fx.squeeze().cpu().numpy()
-
-                # --- Corrección Analítica (De-convolución Wiener) ---
-                psf_np = psf_tensor.squeeze().cpu().numpy()
-                # El parámetro balance representa el NSR (ruido esperado), 0.01 es estándar
-                fx_wiener_np_raw = wiener(x_np_raw, psf_np, balance=0.01)
-                fx_wiener_np_raw = np.clip(fx_wiener_np_raw, 0, 1).astype(np.float32)
-
-                x_np = crop_center(x_np_raw)
-                fx_np = crop_center(fx_np_raw)
-                fx_wiener_np = crop_center(fx_wiener_np_raw)
-
-                fx_np = np.clip(fx_np, 0, 1)
-                x_np = np.clip(x_np, 0, 1)
-
-                # Aplicar la aberración (PSF) para obtener h*x y h*f(x)
-                x_img_tensor = torch.tensor(x_np_raw).unsqueeze(0).unsqueeze(0).to(device)
-                fx_tensor = torch.tensor(fx_np_raw).unsqueeze(0).unsqueeze(0).to(device)
-                fx_wiener_tensor = torch.tensor(fx_wiener_np_raw).unsqueeze(0).unsqueeze(0).to(device)
-
-                h_x = crop_center(apply_psf_torch(x_img_tensor, psf_tensor).squeeze().cpu().numpy())
-                h_fx = crop_center(apply_psf_torch(fx_tensor, psf_tensor).squeeze().cpu().numpy())
-                h_fx_wiener = crop_center(apply_psf_torch(fx_wiener_tensor, psf_tensor).squeeze().cpu().numpy())
-                
-                h_x = np.clip(h_x, 0, 1)
-                h_fx = np.clip(h_fx, 0, 1)
-                h_fx_wiener = np.clip(h_fx_wiener, 0, 1)
-                diff_abs = np.clip(np.abs(x_np - h_fx), 0, 1)
-
-                # Calcular métricas base para h*x vs x (Baseline)
-                ssim_hx = ssim_metric(x_np, h_x, data_range=1.0)
-                psnr_hx = psnr_metric(x_np, h_x, data_range=1.0)
-
-                # Calcular métricas de la compensación para h*f(x) vs x (Resultado)
-                ssim_hfx = ssim_metric(x_np, h_fx, data_range=1.0)
-                psnr_hfx = psnr_metric(x_np, h_fx, data_range=1.0)
-
-                # Calcular métricas para Wiener
-                ssim_wiener = ssim_metric(x_np, h_fx_wiener, data_range=1.0)
-                psnr_wiener = psnr_metric(x_np, h_fx_wiener, data_range=1.0)
-
-                # --- Cálculo de LPIPS ---
-                x_lpips = torch.tensor(x_np).unsqueeze(0).unsqueeze(0).to(device)
-                x_lpips = x_lpips * 2.0 - 1.0  # Rango [-1, 1]
-                x_lpips = x_lpips.repeat(1, 3, 1, 1)  # 1ch -> 3ch
-
-                hx_lpips = torch.tensor(h_x).unsqueeze(0).unsqueeze(0).to(device)
-                hx_lpips = hx_lpips * 2.0 - 1.0
-                hx_lpips = hx_lpips.repeat(1, 3, 1, 1)
-                
-                hfx_lpips = torch.tensor(h_fx).unsqueeze(0).unsqueeze(0).to(device)
-                hfx_lpips = hfx_lpips * 2.0 - 1.0
-                hfx_lpips = hfx_lpips.repeat(1, 3, 1, 1)
-                
-                hwiener_lpips = torch.tensor(h_fx_wiener).unsqueeze(0).unsqueeze(0).to(device)
-                hwiener_lpips = hwiener_lpips * 2.0 - 1.0
-                hwiener_lpips = hwiener_lpips.repeat(1, 3, 1, 1)
+            for idx, x_img in enumerate(tqdm(val_loader, desc=f"Amp {amplitud} | {dname}")):
+                x_img = x_img.to(device)
 
                 with torch.no_grad():
-                    lpips_hx = lpips_fn(x_lpips, hx_lpips).item()
-                    lpips_hfx = lpips_fn(x_lpips, hfx_lpips).item()
-                    lpips_wiener = lpips_fn(x_lpips, hwiener_lpips).item()
+                    fx_prop = model_prop(x_img)
+                    fx_mse  = model_mse(x_img) if model_mse is not None else None
 
-                val_ssims_hx.append(ssim_hx)
-                val_psnrs_hx.append(psnr_hx)
-                val_lpips_hx.append(lpips_hx)
+                x_np_raw    = x_img.squeeze().cpu().numpy()
+                fx_prop_raw = fx_prop.squeeze().cpu().numpy()
+                fx_mse_raw  = fx_mse.squeeze().cpu().numpy() if fx_mse is not None else None
 
-                val_ssims_hfx.append(ssim_hfx)
-                val_psnrs_hfx.append(psnr_hfx)
-                val_lpips_hfx.append(lpips_hfx)
-                
-                val_ssims_wiener.append(ssim_wiener)
-                val_psnrs_wiener.append(psnr_wiener)
-                val_lpips_wiener.append(lpips_wiener)
+                # --- Wiener ---
+                psf_np        = psf_tensor.squeeze().cpu().numpy()
+                fx_wiener_raw = np.clip(wiener(x_np_raw, psf_np, balance=0.01), 0, 1).astype(np.float32)
 
-            # --- Generar Tabla Resumen Exclusiva de este Dataset ---
-            def get_stats(arr):
-                arr = np.array(arr)
-                if len(arr) == 0: return 0,0,0,0
-                return np.mean(arr), np.std(arr), np.min(arr), np.max(arr)
+                # --- Aplicar PSF (h * salida) y recortar bordes ---
+                def to_hfx(arr_raw):
+                    t = torch.tensor(arr_raw).unsqueeze(0).unsqueeze(0).to(device)
+                    return crop_center(apply_psf_torch(t, psf_tensor).squeeze().cpu().numpy())
 
-            mean_psnr_hx, std_psnr_hx, min_psnr_hx, max_psnr_hx = get_stats(val_psnrs_hx)
-            mean_ssim_hx, std_ssim_hx, min_ssim_hx, max_ssim_hx = get_stats(val_ssims_hx)
-            mean_lpips_hx, std_lpips_hx, min_lpips_hx, max_lpips_hx = get_stats(val_lpips_hx)
+                h_x      = np.clip(to_hfx(x_np_raw),    0, 1)
+                h_wiener = np.clip(to_hfx(fx_wiener_raw), 0, 1)
+                h_prop   = np.clip(to_hfx(fx_prop_raw),  0, 1)
+                h_mse    = np.clip(to_hfx(fx_mse_raw),   0, 1) if fx_mse_raw is not None else None
 
-            mean_psnr_hfx, std_psnr_hfx, min_psnr_hfx, max_psnr_hfx = get_stats(val_psnrs_hfx)
-            mean_ssim_hfx, std_ssim_hfx, min_ssim_hfx, max_ssim_hfx = get_stats(val_ssims_hfx)
-            mean_lpips_hfx, std_lpips_hfx, min_lpips_hfx, max_lpips_hfx = get_stats(val_lpips_hfx)
+                x_np = np.clip(crop_center(x_np_raw), 0, 1)
 
-            mean_psnr_wiener, std_psnr_wiener, min_psnr_wiener, max_psnr_wiener = get_stats(val_psnrs_wiener)
-            mean_ssim_wiener, std_ssim_wiener, min_ssim_wiener, max_ssim_wiener = get_stats(val_ssims_wiener)
-            mean_lpips_wiener, std_lpips_wiener, min_lpips_wiener, max_lpips_wiener = get_stats(val_lpips_wiener)
+                # --- PSNR + SSIM ---
+                psnrs_hx.append(psnr_metric(x_np, h_x,      data_range=1.0))
+                ssims_hx.append(ssim_metric(x_np, h_x,      data_range=1.0))
+
+                psnrs_wiener.append(psnr_metric(x_np, h_wiener, data_range=1.0))
+                ssims_wiener.append(ssim_metric(x_np, h_wiener, data_range=1.0))
+
+                psnrs_prop.append(psnr_metric(x_np, h_prop,  data_range=1.0))
+                ssims_prop.append(ssim_metric(x_np, h_prop,  data_range=1.0))
+
+                if h_mse is not None:
+                    psnrs_mse.append(psnr_metric(x_np, h_mse, data_range=1.0))
+                    ssims_mse.append(ssim_metric(x_np, h_mse, data_range=1.0))
+
+                # --- LPIPS ---
+                lpips_hx_list.append(compute_lpips(x_np, h_x))
+                lpips_wiener_list.append(compute_lpips(x_np, h_wiener))
+                lpips_prop_list.append(compute_lpips(x_np, h_prop))
+                if h_mse is not None:
+                    lpips_mse_list.append(compute_lpips(x_np, h_mse))
+
+            # --- Estadísticas ---
+            mp_hx, sp_hx, mnp_hx, mxp_hx           = get_stats(psnrs_hx)
+            ms_hx, ss_hx, mns_hx, mxs_hx           = get_stats(ssims_hx)
+            ml_hx, sl_hx, mnl_hx, mxl_hx           = get_stats(lpips_hx_list)
+
+            mp_wi, sp_wi, mnp_wi, mxp_wi            = get_stats(psnrs_wiener)
+            ms_wi, ss_wi, mns_wi, mxs_wi            = get_stats(ssims_wiener)
+            ml_wi, sl_wi, mnl_wi, mxl_wi            = get_stats(lpips_wiener_list)
+
+            mp_pr, sp_pr, mnp_pr, mxp_pr            = get_stats(psnrs_prop)
+            ms_pr, ss_pr, mns_pr, mxs_pr            = get_stats(ssims_prop)
+            ml_pr, sl_pr, mnl_pr, mxl_pr            = get_stats(lpips_prop_list)
+
+            mp_ms, sp_ms, mnp_ms, mxp_ms            = get_stats(psnrs_mse)
+            ms_ms, ss_ms, mns_ms, mxs_ms            = get_stats(ssims_mse)
+            ml_ms, sl_ms, mnl_ms, mxl_ms            = get_stats(lpips_mse_list)
+
+            has_mse = model_mse is not None
+
+            mse_psnr_row  = f"| PSNR   | UNet-MSE    | {mp_ms:>8.2f} | {sp_ms:>10.2f} | {mnp_ms:>6.2f} | {mxp_ms:>6.2f} |" if has_mse else "| PSNR   | UNet-MSE    |   N/A    |     N/A    |   N/A  |   N/A  |"
+            mse_ssim_row  = f"| SSIM   | UNet-MSE    | {ms_ms:>8.4f} | {ss_ms:>10.4f} | {mns_ms:>6.4f} | {mxs_ms:>6.4f} |" if has_mse else "| SSIM   | UNet-MSE    |   N/A    |     N/A    |   N/A  |   N/A  |"
+            mse_lpips_row = f"| LPIPS  | UNet-MSE    | {ml_ms:>8.4f} | {sl_ms:>10.4f} | {mnl_ms:>6.4f} | {mxl_ms:>6.4f} |" if has_mse else "| LPIPS  | UNet-MSE    |   N/A    |     N/A    |   N/A  |   N/A  |"
+
+            delta_mse_vs_base = (
+                f"  Δ PSNR : {mp_ms - mp_hx:+.2f}\n"
+                f"  Δ SSIM : {ms_ms - ms_hx:+.4f}\n"
+                f"  Δ LPIPS: {ml_ms - ml_hx:+.4f} (Negativo es mejor)"
+            ) if has_mse else "  UNet-MSE no disponible para esta amplitud."
+
+            delta_prop_vs_mse = (
+                f"  Δ PSNR : {mp_pr - mp_ms:+.2f}\n"
+                f"  Δ SSIM : {ms_pr - ms_ms:+.4f}\n"
+                f"  Δ LPIPS: {ml_pr - ml_ms:+.4f} (Negativo es mejor)"
+            ) if has_mse else "  UNet-MSE no disponible para comparar."
 
             report = f"""Resultados Amplitud {amplitud} - DATASET: {dname}
 =========================================================
-| Métrica | Condición | Promedio | Desv. Est. | Mínimo | Máximo |
-|---------|-----------|----------|------------|--------|--------|
-| PSNR    | Baseline  | {mean_psnr_hx:>8.2f} | {std_psnr_hx:>10.2f} | {min_psnr_hx:>6.2f} | {max_psnr_hx:>6.2f} |
-| PSNR    | Wiener    | {mean_psnr_wiener:>8.2f} | {std_psnr_wiener:>10.2f} | {min_psnr_wiener:>6.2f} | {max_psnr_wiener:>6.2f} |
-| PSNR    | UNet      | {mean_psnr_hfx:>8.2f} | {std_psnr_hfx:>10.2f} | {min_psnr_hfx:>6.2f} | {max_psnr_hfx:>6.2f} |
-| SSIM    | Baseline  | {mean_ssim_hx:>8.4f} | {std_ssim_hx:>10.4f} | {min_ssim_hx:>6.4f} | {max_ssim_hx:>6.4f} |
-| SSIM    | Wiener    | {mean_ssim_wiener:>8.4f} | {std_ssim_wiener:>10.4f} | {min_ssim_wiener:>6.4f} | {max_ssim_wiener:>6.4f} |
-| SSIM    | UNet      | {mean_ssim_hfx:>8.4f} | {std_ssim_hfx:>10.4f} | {min_ssim_hfx:>6.4f} | {max_ssim_hfx:>6.4f} |
-| LPIPS   | Baseline  | {mean_lpips_hx:>8.4f} | {std_lpips_hx:>10.4f} | {min_lpips_hx:>6.4f} | {max_lpips_hx:>6.4f} |
-| LPIPS   | Wiener    | {mean_lpips_wiener:>8.4f} | {std_lpips_wiener:>10.4f} | {min_lpips_wiener:>6.4f} | {max_lpips_wiener:>6.4f} |
-| LPIPS   | UNet      | {mean_lpips_hfx:>8.4f} | {std_lpips_hfx:>10.4f} | {min_lpips_hfx:>6.4f} | {max_lpips_hfx:>6.4f} |
+| Métrica | Método      | Promedio | Desv. Est. | Mínimo | Máximo |
+|---------|-------------|----------|------------|--------|--------|
+| PSNR   | Baseline    | {mp_hx:>8.2f} | {sp_hx:>10.2f} | {mnp_hx:>6.2f} | {mxp_hx:>6.2f} |
+| PSNR   | Wiener      | {mp_wi:>8.2f} | {sp_wi:>10.2f} | {mnp_wi:>6.2f} | {mxp_wi:>6.2f} |
+{mse_psnr_row}
+| PSNR   | UNet-Prop   | {mp_pr:>8.2f} | {sp_pr:>10.2f} | {mnp_pr:>6.2f} | {mxp_pr:>6.2f} |
+| SSIM   | Baseline    | {ms_hx:>8.4f} | {ss_hx:>10.4f} | {mns_hx:>6.4f} | {mxs_hx:>6.4f} |
+| SSIM   | Wiener      | {ms_wi:>8.4f} | {ss_wi:>10.4f} | {mns_wi:>6.4f} | {mxs_wi:>6.4f} |
+{mse_ssim_row}
+| SSIM   | UNet-Prop   | {ms_pr:>8.4f} | {ss_pr:>10.4f} | {mns_pr:>6.4f} | {mxs_pr:>6.4f} |
+| LPIPS  | Baseline    | {ml_hx:>8.4f} | {sl_hx:>10.4f} | {mnl_hx:>6.4f} | {mxl_hx:>6.4f} |
+| LPIPS  | Wiener      | {ml_wi:>8.4f} | {sl_wi:>10.4f} | {mnl_wi:>6.4f} | {mxl_wi:>6.4f} |
+{mse_lpips_row}
+| LPIPS  | UNet-Prop   | {ml_pr:>8.4f} | {sl_pr:>10.4f} | {mnl_pr:>6.4f} | {mxl_pr:>6.4f} |
 
-Mejora UNet vs Baseline (Δ):
-  Δ PSNR : {mean_psnr_hfx - mean_psnr_hx:+.2f}
-  Δ SSIM : {mean_ssim_hfx - mean_ssim_hx:+.4f}
-  Δ LPIPS: {mean_lpips_hfx - mean_lpips_hx:+.4f} (Negativo es mejor)
-  
-Mejora UNet vs Wiener (Δ):
-  Δ PSNR : {mean_psnr_hfx - mean_psnr_wiener:+.2f}
-  Δ SSIM : {mean_ssim_hfx - mean_ssim_wiener:+.4f}
-  Δ LPIPS: {mean_lpips_hfx - mean_lpips_wiener:+.4f} (Negativo es mejor)
+Mejora UNet-Prop vs Baseline (Δ):
+  Δ PSNR : {mp_pr - mp_hx:+.2f}
+  Δ SSIM : {ms_pr - ms_hx:+.4f}
+  Δ LPIPS: {ml_pr - ml_hx:+.4f} (Negativo es mejor)
+
+Mejora UNet-Prop vs Wiener (Δ):
+  Δ PSNR : {mp_pr - mp_wi:+.2f}
+  Δ SSIM : {ms_pr - ms_wi:+.4f}
+  Δ LPIPS: {ml_pr - ml_wi:+.4f} (Negativo es mejor)
+
+Mejora UNet-MSE vs Baseline (Δ):
+{delta_mse_vs_base}
+
+Mejora UNet-Prop vs UNet-MSE (Δ):
+{delta_prop_vs_mse}
 {"-"*70}
 """
-            
-            # Escribir en txt individual del dataset
             with open(os.path.join(ds_output_dir, "metricas.txt"), "w", encoding="utf-8") as f:
                 f.write(report)
-            
-            # Escribir en el txt global para compilar todos juntos
+
             f_summary.write(report + "\n")
 
 print(f"\n[+] Evaluación completada. Revisa la carpeta '{output_root}'.")
+
+
+
