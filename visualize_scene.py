@@ -1,11 +1,13 @@
 """
 visualize_scene.py
 ==================
-Genera 4 imágenes en RGB para una escena seleccionada por el usuario:
-  1. x            → imagen original
-  2. h_x          → imagen con aberración (H * X)
-  3. fx_corrected → imagen corregida f(H*X)  — salida del UNet dado H*X como entrada
-  4. h_fx         → H * f(X)                 — PSF aplicada sobre f(X)
+Genera 4 imágenes en RGB para una escena seleccionada por el usuario.
+
+Pipeline de pre-corrección (paradigma correcto del sistema):
+  1. X            → imagen original (GT)
+  2. H·X          → lo que el miope ve SIN corrección (baseline)
+  3. f(X)         → imagen pre-corregida por el UNet (lo que se muestra en pantalla)
+  4. H·f(X)       → lo que el miope percibe CON corrección (debe ≈ X)
 
 Salida: visuales/<nombre_escena>/
 """
@@ -28,7 +30,7 @@ from Resources.Ultris.Ultris_zernike import generate_zernike_map, generate_psf, 
 # =============================================================================
 # CONFIGURACIÓN  (ajusta según tus pesos / amplitud deseada)
 # =============================================================================
-AMPLITUDE   = 1.0                              # Amplitud de la aberración (miopía)
+AMPLITUDE   = 3.0                              # Amplitud de la aberración (miopía)
 N, M        = 2, 0                             # Zernike: desenfoque esférico
 WEIGHTS_DIR = "Resources/weights_prop_UNET"   # Carpeta con los .pt entrenados
 OUTPUT_ROOT = "visuales"                       # Carpeta raíz de salida
@@ -211,47 +213,43 @@ def main():
     x_rgb = load_image_rgb(image_path)   # [H, W, 3]  float32 [0,1]
     print(f"    Dimensiones: {x_rgb.shape}\n")
 
-    # ── 6. Calcular las 4 imágenes ─────────────────────────────────────────────
-    print("[+] Aplicando PSF  → H*X  (imagen con aberración)...")
+    # ── 6. Calcular las 4 imágenes (pipeline de pre-corrección) ───────────────
+    # Imagen 2: H·X  — lo que el miope ve sin ninguna corrección
+    print("[+] Aplicando PSF a X  →  H·X  (miope sin corrección)...")
     hx_rgb = apply_psf_rgb(x_rgb, psf_tensor)
 
-    print("[+] Corrigiendo con UNet  → f(H*X)  (imagen corregida)...")
-    # El UNet recibe la imagen aberrada H*X canal por canal
-    fx_corrected_rgb = np.zeros_like(x_rgb)
+    # Imagen 3: f(X)  — UNet transforma X para mostrarlo en pantalla pre-corregido
+    print("[+] Pasando X por el UNet  →  f(X)  (imagen pre-corregida para pantalla)...")
+    fx_rgb = np.zeros_like(x_rgb)
     for c in range(3):
-        fx_corrected_rgb[..., c] = run_unet_single_channel(hx_rgb[..., c], model)
-    fx_corrected_rgb = np.clip(fx_corrected_rgb, 0.0, 1.0)
+        fx_rgb[..., c] = run_unet_single_channel(x_rgb[..., c], model)
+    fx_rgb = np.clip(fx_rgb, 0.0, 1.0)
 
-    print("[+] Aplicando PSF a f(X)  → H*f(X) ...")
-    # f(X): UNet recibe la imagen ORIGINAL X sin aberrar
-    fx_original_rgb = np.zeros_like(x_rgb)
-    for c in range(3):
-        fx_original_rgb[..., c] = run_unet_single_channel(x_rgb[..., c], model)
-    fx_original_rgb = np.clip(fx_original_rgb, 0.0, 1.0)
+    # Imagen 4: H·f(X)  — lo que el miope percibe al ver f(X) en pantalla (debe ≈ X)
+    print("[+] Aplicando PSF a f(X)  →  H·f(X)  (percepción del miope con corrección)...")
+    hfx_rgb = apply_psf_rgb(fx_rgb, psf_tensor)
 
-    hfx_rgb = apply_psf_rgb(fx_original_rgb, psf_tensor)
-
-    # Opcional: recortar bordes para eliminar artefactos de convolución
+    # Recortar bordes para eliminar artefactos de convolución
     x_out   = crop_center(x_rgb)
     hx_out  = crop_center(hx_rgb)
-    fx_out  = crop_center(fx_corrected_rgb)
+    fx_out  = crop_center(fx_rgb)
     hfx_out = crop_center(hfx_rgb)
 
     # ── 7. Guardar imágenes ────────────────────────────────────────────────────
     print(f"\n[+] Guardando imágenes en '{out_dir}'...")
     save_rgb(x_out,   os.path.join(out_dir, "1_x_original.png"))
-    save_rgb(hx_out,  os.path.join(out_dir, "2_hx_aberrada.png"))
-    save_rgb(fx_out,  os.path.join(out_dir, "3_fhx_corregida.png"))
-    save_rgb(hfx_out, os.path.join(out_dir, "4_hfx.png"))
+    save_rgb(hx_out,  os.path.join(out_dir, "2_hx_sin_correccion.png"))
+    save_rgb(fx_out,  os.path.join(out_dir, "3_fx_precorregida.png"))
+    save_rgb(hfx_out, os.path.join(out_dir, "4_hfx_percepcion.png"))
 
     print(f"\n{'='*60}")
     print(f"  ✅ Listo. 4 imágenes guardadas en:  {out_dir}")
     print(f"{'='*60}\n")
     print("  Imágenes generadas:")
-    print(f"    1_x_original.png    →  X           (imagen original)")
-    print(f"    2_hx_aberrada.png   →  H*X         (con aberración de miopía)")
-    print(f"    3_fhx_corregida.png →  f(H*X)      (corregida por el UNet)")
-    print(f"    4_hfx.png           →  H*f(X)      (PSF aplicada a f(X))")
+    print(f"    1_x_original.png       →  X         (GT — imagen original)")
+    print(f"    2_hx_sin_correccion.png →  H·X      (miope SIN corrección)")
+    print(f"    3_fx_precorregida.png  →  f(X)      (lo que se muestra en pantalla)")
+    print(f"    4_hfx_percepcion.png   →  H·f(X)   (lo que el miope percibe, debe ≈ X)")
     print()
 
 
