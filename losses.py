@@ -37,6 +37,17 @@ def loss_unet_media(unet, h, x, apply_filter):
 def loss_cnn0_x(cnn0, h, x, apply_filter):
     return loss_fn(h(cnn0(x)), x)
 
+def loss_cnn0_x_high_freq(cnn0, h, x, apply_filter, lambd=0.1):
+    recon = h(cnn0(x))
+    # Primer término: MSE
+    recon_loss = F.mse_loss(recon, x)
+    # Gradientes Sobel
+    grad_x_recon, grad_y_recon = sobel_gradients(recon)
+    grad_x, grad_y = sobel_gradients(x)
+    # Segundo término: L1 de gradientes Sobel
+    grad_loss = F.l1_loss(grad_x_recon, grad_x) + F.l1_loss(grad_y_recon, grad_y)
+    return recon_loss + lambd * grad_loss
+
 def loss_cnn0_wiener(cnn0, h, x, apply_filter):
     Iwiener = apply_filter(x, 'wiener')
     return loss_fn(h(cnn0(Iwiener)), x)
@@ -84,13 +95,14 @@ def loss_unet_x_constraint(unet, h, x, apply_filter, alpha=1.0):
 
 
 loss_functions = {
-    #"unet_x": loss_unet_x,                      # Baseline Neuronal (Solo MSE)
-    "unet_x_high_freq": loss_unet_x_high_freq,  # Propuesta Central (MSE + Gradientes Sobel)
-    
+    #"unet_x": loss_unet_x,                          # Baseline Neuronal (Solo MSE)
+    #"unet_x_high_freq": loss_unet_x_high_freq,      # Propuesta Central UNet (MSE + Gradientes Sobel)
+    "cnn0_x": loss_cnn0_x,                           # Baseline CNN (Solo MSE)
+    "cnn0_x_high_freq": loss_cnn0_x_high_freq,       # Propuesta Central CNN (MSE + Gradientes Sobel)
+
     # --- EXPERIMENTALES DESHABILITADAS ---
     # "unet_wiener": loss_unet_wiener,
     # "unet_media": loss_unet_media,
-    # "cnn0_x": loss_cnn0_x,
     # "cnn0_wiener": loss_cnn0_wiener,
     # "cnn0_media": loss_cnn0_media,
     # "wiener_unet_x": loss_wiener_unet_x,

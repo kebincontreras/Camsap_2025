@@ -113,8 +113,6 @@ amplitudes = [0.5, 1.0, 2.0, 3.0]
 # Lista de nombres de experimentos (losses) a probar
 experiment_names = list(loss_functions.keys())
 
-# ...existing code...
-
 for amplitud in amplitudes:
     print(f"Entrenando para amplitud {amplitud}")
     wandb.init(project="restauracion-zernike", config={"n": n, "m": m, "amplitud": amplitud, "epochs": num_epochs}, dir="Resources")
@@ -276,8 +274,6 @@ for amplitud in amplitudes:
                     "hfx_lpips": lpips_hfx
                 })
 
-                # Reducido: Las imagenes matplotlib de epoca han sido eliminadas por rendimiento.
-
             # Guardar ambos modelos si aplica
             if "cnn0_unet" in experiment_name or "unet_cnn0" in experiment_name:
                 torch.save(unet.state_dict(), os.path.join(output_dir, "unet_final.pt"))
@@ -288,17 +284,27 @@ for amplitud in amplitudes:
                 # Formato estándar de amplitud: 0.5 queda como "0.5", 1.0 → "1", 2.0 → "2", 3.0 → "3"
                 fmt_amp = int(amplitud) if isinstance(amplitud, float) and amplitud.is_integer() else amplitud
 
-                # Guardar clon del peso "unet_x" (Solo-MSE) en la carpeta separada
+                # Guardar clon del peso "unet_x" o "cnn0_x" (Solo-MSE) en la carpeta separada
                 if experiment_name == "unet_x":
                     weights_dest = "Resources/weights_MSE_UNET"
                     os.makedirs(weights_dest, exist_ok=True)
                     torch.save(main_model.state_dict(), os.path.join(weights_dest, f"modelo_final_{fmt_amp}.pt"))
-                    print(f"  [✓] Pesos MSE guardados en: {weights_dest}/modelo_final_{fmt_amp}.pt")
+                    print(f"  [✓] Pesos UNet MSE guardados en: {weights_dest}/modelo_final_{fmt_amp}.pt")
+                elif experiment_name == "cnn0_x":
+                    weights_dest = "Resources/weights_mse_cnn"
+                    os.makedirs(weights_dest, exist_ok=True)
+                    torch.save(main_model.state_dict(), os.path.join(weights_dest, f"modelo_final_{fmt_amp}.pt"))
+                    print(f"  [✓] Pesos CNN MSE guardados en: {weights_dest}/modelo_final_{fmt_amp}.pt")
 
-                # Guardar clon del peso "unet_x_high_freq" (Loss propuesta: MSE + Sobel) en la carpeta separada
+                # Guardar clon del peso "unet_x_high_freq" o "cnn0_x_high_freq" (Loss propuesta: MSE + Sobel) en la carpeta separada
                 if experiment_name == "unet_x_high_freq":
                     weights_dest = "Resources/weights_prop_UNET"
                     os.makedirs(weights_dest, exist_ok=True)
                     torch.save(main_model.state_dict(), os.path.join(weights_dest, f"modelo_final_{fmt_amp}.pt"))
-                    print(f"  [✓] Pesos Propuesta guardados en: {weights_dest}/modelo_final_{fmt_amp}.pt")
+                    print(f"  [✓] Pesos UNet Propuesta guardados en: {weights_dest}/modelo_final_{fmt_amp}.pt")
+                elif experiment_name == "cnn0_x_high_freq":
+                    weights_dest = "Resources/weights_prop_cnn"
+                    os.makedirs(weights_dest, exist_ok=True)
+                    torch.save(main_model.state_dict(), os.path.join(weights_dest, f"modelo_final_{fmt_amp}.pt"))
+                    print(f"  [✓] Pesos CNN Propuesta guardados en: {weights_dest}/modelo_final_{fmt_amp}.pt")
     wandb.finish()
